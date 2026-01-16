@@ -1,2 +1,8 @@
+# cJSON uses C89 standard
+CFLAGS=-std=c89
+CFLAGS += -Wall
+CFLAGS += -Wextra
+CFLAGS += -Werror
+
 main: src/main.c
-	gcc src/main.c -o main
+	$(CC) $(CFLAGS) src/main.c src/cJSON.c -o main
