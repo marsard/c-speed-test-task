@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <curl/curl.h>
 #include "cJSON.h"
 
 cJSON *read_json_file(const char *filename) {
@@ -33,10 +34,32 @@ cJSON *read_json_file(const char *filename) {
     return json;
 }
 
+void curl_test(const char *host) {
+    CURL *curl = curl_easy_init();
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, host);
+        CURLcode res = curl_easy_perform(curl);
+        if (res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
+        curl_easy_cleanup(curl);
+    }
+}
+
 int main(int argc, char *argv[]) {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
     cJSON *json = read_json_file("speedtest_server_list.json");
+    cJSON *first = cJSON_GetArrayItem(json, 0);
+    cJSON *host_item = cJSON_GetObjectItem(first, "host");
+    if (host_item && cJSON_IsString(host_item)) {
+        const char *host = cJSON_GetStringValue(host_item);
+        printf("Testing host: %s\n", host);
+        curl_test(host);
+    }
 
     /* Print json structure */
+    /*
     if (cJSON_IsObject(json)) {
         printf("json is an object.\n");
     } else if (cJSON_IsArray(json)) {
@@ -52,7 +75,8 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-    }
+    }*/
+
 
     int option;
     while ((option = getopt(argc, argv, "du:")) != -1) {
@@ -69,7 +93,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    /* Cleanup */
     cJSON_Delete(json);
+    curl_global_cleanup();
 
     return EXIT_SUCCESS;
 }

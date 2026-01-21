@@ -4,5 +4,7 @@ CFLAGS += -Wall
 CFLAGS += -Wextra
 CFLAGS += -Werror
 
+LDFLAGS=-lcurl
+
 main: src/main.c
-	$(CC) $(CFLAGS) src/main.c src/cJSON.c -o main
+	$(CC) $(CFLAGS) src/main.c src/cJSON.c -o main $(LDFLAGS)
