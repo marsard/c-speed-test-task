@@ -6,6 +6,14 @@
 #include <curl/curl.h>
 #include "cJSON.h"
 
+/* Constants */
+#define SPEEDTEST_TIMEOUT_SEC 15
+#define UPLOAD_SIZE_MB 25
+#define LOCATION_API_URL "http://ip-api.com/json/"
+#define LOCATION_API_TIMEOUT_SEC 10
+#define DOWNLOAD_PATH "/speedtest/random4000x4000.jpg"
+#define UPLOAD_PATH "/speedtest/upload.php"
+
 cJSON *read_json_file(const char *filename) {
     FILE *stream = fopen(filename, "r");
     if (!stream) {
@@ -47,6 +55,11 @@ struct response_data {
     size_t size;
 };
 
+struct progress_data {
+    curl_off_t last_bytes_shown;
+    int is_upload;
+};
+
 static size_t download_write_callback(char *buffer, size_t size, size_t nitems, void *outstream) {
     (void)buffer;
     struct transfer_data *data = (struct transfer_data *)outstream;
@@ -86,24 +99,26 @@ static size_t upload_read_callback(char *buffer, size_t size, size_t nitems, voi
 
 static int transfer_progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
                                      curl_off_t ultotal, curl_off_t ulnow) {
-    (void)clientp;
-    static curl_off_t last_bytes_shown = 0;
-    static int is_upload = 0;
+    struct progress_data *progress = (struct progress_data *)clientp;
     curl_off_t one_mb = 1024 * 1024;
     curl_off_t current_bytes;
 
+    if (!progress) {
+        return 0;
+    }
+
     /* Determine if this is upload or download */
     if (ultotal > 0 || ulnow > 0) {
-        is_upload = 1;
+        progress->is_upload = 1;
         current_bytes = ulnow;
     } else {
-        is_upload = 0;
+        progress->is_upload = 0;
         current_bytes = dlnow;
     }
 
     /* Show progress every 1MB */
-    if (current_bytes >= last_bytes_shown + one_mb) {
-        if (is_upload) {
+    if (current_bytes >= progress->last_bytes_shown + one_mb) {
+        if (progress->is_upload) {
             if (ultotal > 0) {
                 double percent = (ulnow * 100.0) / ultotal;
                 double mb_current = ulnow / (1024.0 * 1024.0);
@@ -127,7 +142,7 @@ static int transfer_progress_callback(void *clientp, curl_off_t dltotal, curl_of
             }
         }
         fflush(stdout);
-        last_bytes_shown = current_bytes;
+        progress->last_bytes_shown = current_bytes;
     }
 
     return 0;
@@ -139,7 +154,7 @@ void curl_download_test(const char *host) {
         char url[256];
         strcpy(url, "http://");
         strcat(url, host);
-        strcat(url, "/speedtest/random4000x4000.jpg");
+        strcat(url, DOWNLOAD_PATH);
 
         struct transfer_data data;
         data.total_bytes = 0;
@@ -147,13 +162,17 @@ void curl_download_test(const char *host) {
         data.upload_size = 0;
         data.upload_sent = 0;
 
+        struct progress_data progress;
+        progress.last_bytes_shown = 0;
+        progress.is_upload = 0;
+
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, download_write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &data);
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transfer_progress_callback);
-        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &data);
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress);
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)SPEEDTEST_TIMEOUT_SEC);
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
 
         printf("Testing download speed from %s...\n", host);
@@ -191,10 +210,10 @@ void curl_upload_test(const char *host) {
         char url[256];
         strcpy(url, "http://");
         strcat(url, host);
-        strcat(url, "/speedtest/upload.php");
+        strcat(url, UPLOAD_PATH);
 
         /* Generate upload data */
-        size_t upload_size = 25 * 1024 * 1024;
+        size_t upload_size = UPLOAD_SIZE_MB * 1024 * 1024;
         char *upload_buffer = malloc(upload_size);
         if (!upload_buffer) {
             fprintf(stderr, "Failed to allocate upload buffer\n");
@@ -211,15 +230,19 @@ void curl_upload_test(const char *host) {
         data.upload_size = upload_size;
         data.upload_sent = 0;
 
+        struct progress_data progress;
+        progress.last_bytes_shown = 0;
+        progress.is_upload = 1;
+
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
         curl_easy_setopt(curl, CURLOPT_READFUNCTION, upload_read_callback);
         curl_easy_setopt(curl, CURLOPT_READDATA, &data);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)upload_size);
         curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transfer_progress_callback);
-        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &data);
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress);
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)SPEEDTEST_TIMEOUT_SEC);
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
 
         printf("Testing upload speed to %s...\n", host);
@@ -267,11 +290,10 @@ char *detect_location(void) {
     response.buffer = NULL;
     response.size = 0;
 
-    curl_easy_setopt(curl, CURLOPT_URL, "http://ip-api.com/json/");
+    curl_easy_setopt(curl, CURLOPT_URL, LOCATION_API_URL);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, api_response_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)LOCATION_API_TIMEOUT_SEC);
 
     CURLcode res = curl_easy_perform(curl);
 
@@ -311,37 +333,6 @@ int main(int argc, char *argv[]) {
         printf("Failed to detect location\n");
     }
 
-    /*
-    cJSON *json = read_json_file("speedtest_server_list.json");
-    cJSON *first = cJSON_GetArrayItem(json, 0);
-    cJSON *host_item = cJSON_GetObjectItem(first, "host");
-    if (host_item && cJSON_IsString(host_item)) {
-        const char *host = cJSON_GetStringValue(host_item);
-        printf("Testing host: %s\n", host);
-        curl_upload_test(host);
-    }
-    */
-
-    /* Print json structure */
-    /*
-    if (cJSON_IsObject(json)) {
-        printf("json is an object.\n");
-    } else if (cJSON_IsArray(json)) {
-        printf("json is an array with %d items\n", cJSON_GetArraySize(json));
-        if (cJSON_GetArraySize(json) > 0) {
-            cJSON *first = cJSON_GetArrayItem(json, 0);
-            if (cJSON_IsObject(first)) {
-                printf("first item is an object with fields:\n");
-                cJSON *item = first->child;
-                while (item) {
-                    printf("- %s\n", item->string);
-                    item = item->next;
-                }
-            }
-        }
-    }*/
-
-
     int option;
     while ((option = getopt(argc, argv, "du:")) != -1) {
         switch (option) {
@@ -356,9 +347,6 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Usage: %s [du] \n", argv[0]);
         }
     }
-
-    /* Cleanup */
-    /* cJSON_Delete(json); */
     curl_global_cleanup();
 
     return EXIT_SUCCESS;
