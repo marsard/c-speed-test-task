@@ -60,6 +60,37 @@ struct progress_data {
     int is_upload;
 };
 
+static int test_server_reachable(const char *host) {
+    CURL *curl = curl_easy_init();
+    int reachable = 0;
+
+    if (!curl) {
+        return 0;
+    }
+
+    char url[256];
+    strcpy(url, "http://");
+    strcat(url, host);
+    strcat(url, "/");
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_NOBODY, 1L); /* HEAD request */
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res == CURLE_OK) {
+        long response_code;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+        if (response_code >= 200 && response_code < 500) {
+            reachable = 1;
+        }
+    }
+
+    curl_easy_cleanup(curl);
+    return reachable;
+}
+
 static size_t download_write_callback(char *buffer, size_t size, size_t nitems, void *outstream) {
     (void)buffer;
     struct transfer_data *data = (struct transfer_data *)outstream;
@@ -98,7 +129,7 @@ static size_t upload_read_callback(char *buffer, size_t size, size_t nitems, voi
 }
 
 static int transfer_progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
-                                     curl_off_t ultotal, curl_off_t ulnow) {
+                                      curl_off_t ultotal, curl_off_t ulnow) {
     struct progress_data *progress = (struct progress_data *)clientp;
     curl_off_t one_mb = 1024 * 1024;
     curl_off_t current_bytes;
@@ -323,14 +354,27 @@ char *detect_location(void) {
 int main(int argc, char *argv[]) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
-    /* location detection */
-    printf("Detecting location...\n");
-    char *country = detect_location();
-    if (country) {
-        printf("Location: %s\n", country);
-        free(country);
-    } else {
-        printf("Failed to detect location\n");
+    cJSON *json = read_json_file("speedtest_server_list.json");
+    if (json && cJSON_IsArray(json)) {
+        int count = cJSON_GetArraySize(json);
+        printf("Testing first 5 servers for reachability:\n");
+        int i;
+        int max_test = (count < 5) ? count : 5;
+        for (i = 0; i < max_test; i++) {
+            cJSON *server = cJSON_GetArrayItem(json, i);
+            if (server) {
+                const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(server, "host"));
+                if (host) {
+                    printf("Testing %s... ", host);
+                    if (test_server_reachable(host)) {
+                        printf("OK\n");
+                    } else {
+                        printf("Failed\n");
+                    }
+                }
+            }
+        }
+        cJSON_Delete(json);
     }
 
     int option;
