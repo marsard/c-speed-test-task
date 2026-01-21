@@ -34,6 +34,26 @@ cJSON *read_json_file(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
+    cJSON *json = read_json_file("speedtest_server_list.json");
+
+    /* Print json structure */
+    if (cJSON_IsObject(json)) {
+        printf("json is an object.\n");
+    } else if (cJSON_IsArray(json)) {
+        printf("json is an array with %d items\n", cJSON_GetArraySize(json));
+        if (cJSON_GetArraySize(json) > 0) {
+            cJSON *first = cJSON_GetArrayItem(json, 0);
+            if (cJSON_IsObject(first)) {
+                printf("first item is an object with fields:\n");
+                cJSON *item = first->child;
+                while (item) {
+                    printf("- %s\n", item->string);
+                    item = item->next;
+                }
+            }
+        }
+    }
+
     int option;
     while ((option = getopt(argc, argv, "du:")) != -1) {
         switch (option) {
@@ -48,6 +68,8 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Usage: %s [du] \n", argv[0]);
         }
     }
+
+    cJSON_Delete(json);
 
     return EXIT_SUCCESS;
 }
