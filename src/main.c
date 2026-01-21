@@ -42,7 +42,12 @@ struct transfer_data {
     size_t upload_sent;  /* Bytes already sent */
 };
 
-static size_t write_callback(char *buffer, size_t size, size_t nitems, void *outstream) {
+struct response_data {
+    char *buffer;
+    size_t size;
+};
+
+static size_t download_write_callback(char *buffer, size_t size, size_t nitems, void *outstream) {
     (void)buffer;
     struct transfer_data *data = (struct transfer_data *)outstream;
     size_t realsize = size * nitems;
@@ -50,7 +55,21 @@ static size_t write_callback(char *buffer, size_t size, size_t nitems, void *out
     return realsize;
 }
 
-static size_t read_callback(char *buffer, size_t size, size_t nitems, void *instream) {
+static size_t api_response_callback(char *buffer, size_t size, size_t nitems, void *outstream) {
+    struct response_data *data = (struct response_data *)outstream;
+    size_t realsize = size * nitems;
+
+    data->buffer = realloc(data->buffer, data->size + realsize + 1);
+    if (data->buffer) {
+        memcpy(&(data->buffer[data->size]), buffer, realsize);
+        data->size += realsize;
+        data->buffer[data->size] = '\0';
+    }
+
+    return realsize;
+}
+
+static size_t upload_read_callback(char *buffer, size_t size, size_t nitems, void *instream) {
     struct transfer_data *data = (struct transfer_data *)instream;
     size_t max_bytes = size * nitems;
     size_t remaining = data->upload_size - data->upload_sent;
@@ -65,8 +84,8 @@ static size_t read_callback(char *buffer, size_t size, size_t nitems, void *inst
     return to_send;
 }
 
-static int xferinfo_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
-                             curl_off_t ultotal, curl_off_t ulnow) {
+static int transfer_progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
+                                     curl_off_t ultotal, curl_off_t ulnow) {
     (void)clientp;
     static curl_off_t last_bytes_shown = 0;
     static int is_upload = 0;
@@ -129,9 +148,9 @@ void curl_download_test(const char *host) {
         data.upload_sent = 0;
 
         curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, download_write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &data);
-        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_callback);
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transfer_progress_callback);
         curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &data);
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
@@ -194,10 +213,10 @@ void curl_upload_test(const char *host) {
 
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_callback);
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, upload_read_callback);
         curl_easy_setopt(curl, CURLOPT_READDATA, &data);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)upload_size);
-        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_callback);
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transfer_progress_callback);
         curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &data);
         curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
@@ -234,18 +253,74 @@ void curl_upload_test(const char *host) {
     }
 }
 
+/* Detect user's location using geolocation API */
+char *detect_location(void) {
+    CURL *curl = curl_easy_init();
+    char *country = NULL;
+
+    if (!curl) {
+        fprintf(stderr, "Failed to initialize curl for location detection\n");
+        return NULL;
+    }
+
+    struct response_data response;
+    response.buffer = NULL;
+    response.size = 0;
+
+    curl_easy_setopt(curl, CURLOPT_URL, "http://ip-api.com/json/");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, api_response_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
+
+    CURLcode res = curl_easy_perform(curl);
+
+    if (res == CURLE_OK && response.buffer) {
+        cJSON *json = cJSON_Parse(response.buffer);
+        if (json) {
+            cJSON *country_item = cJSON_GetObjectItem(json, "country");
+            if (country_item && cJSON_IsString(country_item)) {
+                const char *country_str = cJSON_GetStringValue(country_item);
+                country = malloc(strlen(country_str) + 1);
+                if (country) {
+                    strcpy(country, country_str);
+                }
+            }
+            cJSON_Delete(json);
+        }
+    } else {
+        fprintf(stderr, "Location detection failed: %s\n", curl_easy_strerror(res));
+    }
+
+    free(response.buffer);
+    curl_easy_cleanup(curl);
+
+    return country;
+}
+
 int main(int argc, char *argv[]) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
+    /* location detection */
+    printf("Detecting location...\n");
+    char *country = detect_location();
+    if (country) {
+        printf("Location: %s\n", country);
+        free(country);
+    } else {
+        printf("Failed to detect location\n");
+    }
+
+    /*
     cJSON *json = read_json_file("speedtest_server_list.json");
     cJSON *first = cJSON_GetArrayItem(json, 0);
     cJSON *host_item = cJSON_GetObjectItem(first, "host");
     if (host_item && cJSON_IsString(host_item)) {
         const char *host = cJSON_GetStringValue(host_item);
         printf("Testing host: %s\n", host);
-        /* curl_download_test(host); */
         curl_upload_test(host);
     }
+    */
 
     /* Print json structure */
     /*
@@ -283,7 +358,7 @@ int main(int argc, char *argv[]) {
     }
 
     /* Cleanup */
-    cJSON_Delete(json);
+    /* cJSON_Delete(json); */
     curl_global_cleanup();
 
     return EXIT_SUCCESS;
