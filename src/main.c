@@ -24,7 +24,7 @@ cJSON *read_json_file(const char *filename) {
 
     cJSON *json = cJSON_Parse(buffer);
     if (!json) {
-        fprintf(stderr, "Parse error: %s\n", cJSON_GetErrorPtr());
+        fprintf(stderr, "Parse error: %.100s\n", cJSON_GetErrorPtr());
         free(buffer);
         exit(EXIT_FAILURE);
     }
