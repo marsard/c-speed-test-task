@@ -307,10 +307,15 @@ void curl_upload_test(const char *host) {
     }
 }
 
+struct location {
+    char *country;
+    char *city;
+};
+
 /* Detect user's location using geolocation API */
-char *detect_location(void) {
+struct location *detect_location(void) {
     CURL *curl = curl_easy_init();
-    char *country = NULL;
+    struct location *loc = NULL;
 
     if (!curl) {
         fprintf(stderr, "Failed to initialize curl for location detection\n");
@@ -331,12 +336,31 @@ char *detect_location(void) {
     if (res == CURLE_OK && response.buffer) {
         cJSON *json = cJSON_Parse(response.buffer);
         if (json) {
-            cJSON *country_item = cJSON_GetObjectItem(json, "country");
-            if (country_item && cJSON_IsString(country_item)) {
-                const char *country_str = cJSON_GetStringValue(country_item);
-                country = malloc(strlen(country_str) + 1);
-                if (country) {
-                    strcpy(country, country_str);
+            loc = malloc(sizeof(struct location));
+            if (loc) {
+                loc->country = NULL;
+                loc->city = NULL;
+
+                cJSON *country_item = cJSON_GetObjectItem(json, "country");
+                if (country_item && cJSON_IsString(country_item)) {
+                    const char *country_str = cJSON_GetStringValue(country_item);
+                    if (country_str) {
+                        loc->country = malloc(strlen(country_str) + 1);
+                        if (loc->country) {
+                            strcpy(loc->country, country_str);
+                        }
+                    }
+                }
+
+                cJSON *city_item = cJSON_GetObjectItem(json, "city");
+                if (city_item && cJSON_IsString(city_item)) {
+                    const char *city_str = cJSON_GetStringValue(city_item);
+                    if (city_str) {
+                        loc->city = malloc(strlen(city_str) + 1);
+                        if (loc->city) {
+                            strcpy(loc->city, city_str);
+                        }
+                    }
                 }
             }
             cJSON_Delete(json);
@@ -348,13 +372,30 @@ char *detect_location(void) {
     free(response.buffer);
     curl_easy_cleanup(curl);
 
-    return country;
+    return loc;
 }
 
 int main(int argc, char *argv[]) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
+    printf("Detecting location...\n");
+    struct location *loc = detect_location();
+    if (loc) {
+        printf("Country: %s\n", loc->country ? loc->country : "Unknown");
+        printf("City: %s\n", loc->city ? loc->city : "Unknown");
+    } else {
+        printf("Failed to detect location\n");
+    }
+
+
     cJSON *json = read_json_file("speedtest_server_list.json");
+    cJSON *first = cJSON_GetArrayItem(json, 0);
+    const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(first, "host"));
+    test_server_reachable(host);
+    if (json) {
+        cJSON_Delete(json);
+    }
+    /*
     if (json && cJSON_IsArray(json)) {
         int count = cJSON_GetArraySize(json);
         printf("Testing first 5 servers for reachability:\n");
@@ -376,6 +417,7 @@ int main(int argc, char *argv[]) {
         }
         cJSON_Delete(json);
     }
+    */
 
     int option;
     while ((option = getopt(argc, argv, "du:")) != -1) {
@@ -391,7 +433,13 @@ int main(int argc, char *argv[]) {
                 fprintf(stderr, "Usage: %s [du] \n", argv[0]);
         }
     }
+
     curl_global_cleanup();
+    if (loc) {
+        free(loc->country);
+        free(loc->city);
+        free(loc);
+    }
 
     return EXIT_SUCCESS;
 }
