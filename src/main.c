@@ -37,47 +37,84 @@ cJSON *read_json_file(const char *filename) {
 
 struct transfer_data {
     size_t total_bytes;  /* Accumulated bytes for download or upload */
+    char *upload_buffer; /* Buffer for upload data */
+    size_t upload_size;  /* Total size of upload buffer */
+    size_t upload_sent;  /* Bytes already sent */
 };
 
-static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
-    (void)contents;
-    struct transfer_data *data = (struct transfer_data *)userp;
-    size_t realsize = size * nmemb;
+static size_t write_callback(char *buffer, size_t size, size_t nitems, void *outstream) {
+    (void)buffer;
+    struct transfer_data *data = (struct transfer_data *)outstream;
+    size_t realsize = size * nitems;
     data->total_bytes += realsize;
     return realsize;
+}
+
+static size_t read_callback(char *buffer, size_t size, size_t nitems, void *instream) {
+    struct transfer_data *data = (struct transfer_data *)instream;
+    size_t max_bytes = size * nitems;
+    size_t remaining = data->upload_size - data->upload_sent;
+    size_t to_send = (max_bytes < remaining) ? max_bytes : remaining;
+
+    if (to_send > 0 && data->upload_buffer) {
+        memcpy(buffer, data->upload_buffer + data->upload_sent, to_send);
+        data->upload_sent += to_send;
+        data->total_bytes += to_send;
+    }
+
+    return to_send;
 }
 
 static int xferinfo_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
                              curl_off_t ultotal, curl_off_t ulnow) {
     (void)clientp;
-    (void)ultotal;
-    (void)ulnow;
+    static curl_off_t last_bytes_shown = 0;
+    static int is_upload = 0;
+    curl_off_t one_mb = 1024 * 1024;
+    curl_off_t current_bytes;
+
+    /* Determine if this is upload or download */
+    if (ultotal > 0 || ulnow > 0) {
+        is_upload = 1;
+        current_bytes = ulnow;
+    } else {
+        is_upload = 0;
+        current_bytes = dlnow;
+    }
 
     /* Show progress every 1MB */
-    static curl_off_t last_bytes_shown = 0;
-    curl_off_t one_mb = 1024 * 1024;
-
-    if (dlnow >= last_bytes_shown + one_mb) {
-        if (dltotal > 0) {
-            /* Server sent Content-Length, show percentage */
-            double percent = (dlnow * 100.0) / dltotal;
-            double mb_current = dlnow / (1024.0 * 1024.0);
-            double mb_total = dltotal / (1024.0 * 1024.0);
-            printf("\rDownload progress: %.2f / %.2f MB (%.1f%%)...",
-                   mb_current, mb_total, percent);
+    if (current_bytes >= last_bytes_shown + one_mb) {
+        if (is_upload) {
+            if (ultotal > 0) {
+                double percent = (ulnow * 100.0) / ultotal;
+                double mb_current = ulnow / (1024.0 * 1024.0);
+                double mb_total = ultotal / (1024.0 * 1024.0);
+                printf("\rUpload progress: %.2f / %.2f MB (%.1f%%)...",
+                       mb_current, mb_total, percent);
+            } else {
+                double mb_current = ulnow / (1024.0 * 1024.0);
+                printf("\rUpload progress: %.2f MB uploaded...", mb_current);
+            }
         } else {
-            /* No Content-Length, just show downloaded amount */
-            double mb_current = dlnow / (1024.0 * 1024.0);
-            printf("\rDownload progress: %.2f MB downloaded...", mb_current);
+            if (dltotal > 0) {
+                double percent = (dlnow * 100.0) / dltotal;
+                double mb_current = dlnow / (1024.0 * 1024.0);
+                double mb_total = dltotal / (1024.0 * 1024.0);
+                printf("\rDownload progress: %.2f / %.2f MB (%.1f%%)...",
+                       mb_current, mb_total, percent);
+            } else {
+                double mb_current = dlnow / (1024.0 * 1024.0);
+                printf("\rDownload progress: %.2f MB downloaded...", mb_current);
+            }
         }
         fflush(stdout);
-        last_bytes_shown = dlnow;
+        last_bytes_shown = current_bytes;
     }
 
     return 0;
 }
 
-void curl_test(const char *host) {
+void curl_download_test(const char *host) {
     CURL *curl = curl_easy_init();
     if (curl) {
         char url[256];
@@ -87,6 +124,9 @@ void curl_test(const char *host) {
 
         struct transfer_data data;
         data.total_bytes = 0;
+        data.upload_buffer = NULL;
+        data.upload_size = 0;
+        data.upload_sent = 0;
 
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
@@ -126,6 +166,74 @@ void curl_test(const char *host) {
     }
 }
 
+void curl_upload_test(const char *host) {
+    CURL *curl = curl_easy_init();
+    if (curl) {
+        char url[256];
+        strcpy(url, "http://");
+        strcat(url, host);
+        strcat(url, "/speedtest/upload.php");
+
+        /* Generate upload data */
+        size_t upload_size = 25 * 1024 * 1024;
+        char *upload_buffer = malloc(upload_size);
+        if (!upload_buffer) {
+            fprintf(stderr, "Failed to allocate upload buffer\n");
+            curl_easy_cleanup(curl);
+            return;
+        }
+
+        /* Fill with some data */
+        memset(upload_buffer, 'A', upload_size);
+
+        struct transfer_data data;
+        data.total_bytes = 0;
+        data.upload_buffer = upload_buffer;
+        data.upload_size = upload_size;
+        data.upload_sent = 0;
+
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_callback);
+        curl_easy_setopt(curl, CURLOPT_READDATA, &data);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)upload_size);
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, xferinfo_callback);
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &data);
+        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
+
+        printf("Testing upload speed to %s...\n", host);
+        CURLcode res = curl_easy_perform(curl);
+        printf("\n");
+
+        if (res == CURLE_OK) {
+            long response_code;
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+            double total_time;
+            curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
+            if (response_code == 200 && total_time > 0 && data.total_bytes > 0) {
+                double speed_bps = (data.total_bytes * 8.0) / total_time;
+                double speed_mbps = speed_bps / 1000000.0;
+                double mb_uploaded = data.total_bytes / (1024.0 * 1024.0);
+                printf("Uploaded %.2f MB in %.2f seconds\n", mb_uploaded, total_time);
+                printf("Upload speed: %.2f Mbps\n", speed_mbps);
+            } else {
+                if (response_code != 200) {
+                    printf("Warning: Server returned error code %ld\n", response_code);
+                } else {
+                    printf("Warning: No data uploaded or time is zero\n");
+                }
+            }
+        } else {
+            fprintf(stderr, "Upload failed: %s\n", curl_easy_strerror(res));
+        }
+
+        free(upload_buffer);
+        curl_easy_cleanup(curl);
+    }
+}
+
 int main(int argc, char *argv[]) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
@@ -135,7 +243,8 @@ int main(int argc, char *argv[]) {
     if (host_item && cJSON_IsString(host_item)) {
         const char *host = cJSON_GetStringValue(host_item);
         printf("Testing host: %s\n", host);
-        curl_test(host);
+        /* curl_download_test(host); */
+        curl_upload_test(host);
     }
 
     /* Print json structure */
