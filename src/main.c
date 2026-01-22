@@ -132,7 +132,7 @@ cJSON *read_json_file(const char *filename) {
     FILE *stream = fopen(filename, "r");
     if (!stream) {
         fprintf(stderr, "Error opening file: %s\n", filename);
-        exit(EXIT_FAILURE);
+        return NULL;
     }
 
     /* Get file size */
@@ -140,9 +140,28 @@ cJSON *read_json_file(const char *filename) {
     long size = ftell(stream);
     fseek(stream, 0, SEEK_SET);
 
+    if (size <= 0) {
+        fprintf(stderr, "Error: Invalid file size: %s\n", filename);
+        fclose(stream);
+        return NULL;
+    }
+
     /* Read into buffer */
     char *buffer = malloc(size + 1);
-    fread(buffer, 1, size, stream);
+    if (!buffer) {
+        fprintf(stderr, "Error: Failed to allocate memory for file: %s\n", filename);
+        fclose(stream);
+        return NULL;
+    }
+
+    size_t bytes_read = fread(buffer, 1, size, stream);
+    if (bytes_read != (size_t)size) {
+        fprintf(stderr, "Error: Failed to read file completely: %s\n", filename);
+        free(buffer);
+        fclose(stream);
+        return NULL;
+    }
+
     buffer[size] = '\0';
     fclose(stream);
 
@@ -150,7 +169,7 @@ cJSON *read_json_file(const char *filename) {
     if (!json) {
         fprintf(stderr, "Parse error: %.100s\n", cJSON_GetErrorPtr());
         free(buffer);
-        exit(EXIT_FAILURE);
+        return NULL;
     }
     free(buffer);
 
