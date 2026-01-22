@@ -8,7 +8,7 @@
 
 /* Constants */
 #define SPEEDTEST_TIMEOUT_SEC 15
-#define UPLOAD_SIZE_MB 25
+#define UPLOAD_SIZE_MB 30
 #define LOCATION_API_URL "http://ip-api.com/json/"
 #define LOCATION_API_TIMEOUT_SEC 10
 #define DOWNLOAD_PATH "/speedtest/random4000x4000.jpg"
