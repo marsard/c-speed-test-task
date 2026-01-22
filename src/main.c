@@ -13,6 +13,7 @@
 #define LOCATION_API_TIMEOUT_SEC 10
 #define DOWNLOAD_PATH "/speedtest/random4000x4000.jpg"
 #define UPLOAD_PATH "/speedtest/upload.php"
+#define MAX_URL_LENGTH 256
 
 struct transfer_data {
     size_t total_bytes;  /* Accumulated bytes for download or upload */
@@ -192,7 +193,7 @@ static int test_server_reachable(const char *host) {
         return 0;
     }
 
-    char url[256];
+    char url[MAX_URL_LENGTH];
     strcpy(url, "http://");
     strcat(url, host);
     strcat(url, "/");
@@ -319,7 +320,7 @@ double test_download_speed(const char *host) {
         return -1.0;
     }
 
-    char url[256];
+    char url[MAX_URL_LENGTH];
     strcpy(url, "http://");
     strcat(url, host);
     strcat(url, DOWNLOAD_PATH);
@@ -393,7 +394,7 @@ double test_upload_speed(const char *host) {
         return -1.0;
     }
 
-    char url[256];
+    char url[MAX_URL_LENGTH];
     strcpy(url, "http://");
     strcat(url, host);
     strcat(url, UPLOAD_PATH);
