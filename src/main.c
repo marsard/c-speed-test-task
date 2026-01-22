@@ -22,14 +22,16 @@ struct transfer_data {
     size_t upload_sent;  /* Bytes already sent */
 };
 
-struct response_data {
-    char *buffer;
-    size_t size;
-};
-
+/* upload/download progress */
 struct progress_data {
     curl_off_t last_bytes_shown;
     int is_upload;
+};
+
+/* Geolocation api response */
+struct response_data {
+    char *buffer;
+    size_t size;
 };
 
 struct location {
@@ -46,6 +48,7 @@ static size_t download_write_callback(char *buffer, size_t size, size_t nitems,
     return realsize;
 }
 
+/* Omit the server output during upload */
 static size_t discard_response_callback(char *buffer, size_t size, size_t nitems,
                                         void *outstream) {
     (void)buffer;
@@ -85,6 +88,7 @@ static size_t upload_read_callback(char *buffer, size_t size, size_t nitems,
     return to_send;
 }
 
+/* Display progress updates every 1MB */
 static int transfer_progress_callback(void *clientp, curl_off_t dltotal,
                                       curl_off_t dlnow, curl_off_t ultotal,
                                       curl_off_t ulnow) {
@@ -137,6 +141,7 @@ static int transfer_progress_callback(void *clientp, curl_off_t dltotal,
     return 0;
 }
 
+/* Read and parse JSON file into cJSON object. Returns NULL on error. */
 cJSON *read_json_file(const char *filename) {
     FILE *stream = fopen(filename, "r");
     if (!stream) {
@@ -185,6 +190,10 @@ cJSON *read_json_file(const char *filename) {
     return json;
 }
 
+/*
+ * Test if server is reachable using HEAD (no body) request.
+ * Returns 1 if reachable, 0 otherwise.
+ */
 static int test_server_reachable(const char *host) {
     CURL *curl = curl_easy_init();
     int reachable = 0;
