@@ -553,11 +553,11 @@ struct location *detect_location(void) {
 static void print_usage(const char *program_name) {
     printf("Usage: %s [OPTIONS]\n\n", program_name);
     printf("Options:\n");
+    printf("  -a, --automated          Run full automated test\n");
     printf("  -d, --download <server>  Test download speed with specified server\n");
     printf("  -u, --upload <server>    Test upload speed with specified server\n");
     printf("  -s, --server             Find best server by location\n");
     printf("  -l, --location           Detect user location\n");
-    printf("  -a, --automated          Run full automated test\n");
     printf("  -h, --help               Show this help message\n");
 }
 
