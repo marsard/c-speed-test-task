@@ -471,68 +471,121 @@ struct location *detect_location(void) {
     return loc;
 }
 
+static void print_usage(const char *program_name) {
+    printf("Usage: %s [OPTIONS]\n\n", program_name);
+    printf("Options:\n");
+    printf("  -d, --download <server>  Test download speed with specified server\n");
+    printf("  -u, --upload <server>    Test upload speed with specified server\n");
+    printf("  -s, --server             Find best server by location\n");
+    printf("  -l, --location           Detect user location\n");
+    printf("  -a, --automated          Run full automated test\n");
+    printf("  -h, --help               Show this help message\n");
+}
+
 int main(int argc, char *argv[]) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
-    printf("Detecting location...\n");
-    struct location *loc = detect_location();
-    if (loc) {
-        printf("Country: %s\n", loc->country ? loc->country : "Unknown");
-        printf("City: %s\n", loc->city ? loc->city : "Unknown");
-    } else {
-        printf("Failed to detect location\n");
-    }
-
-
-    /* Find best server */
-    cJSON *json = read_json_file("speedtest_server_list.json");
-    if (json && cJSON_IsArray(json)) {
-        int count = cJSON_GetArraySize(json);
-        printf("Found %d servers\n", count);
-        printf("Finding best server...\n");
-
-        const char *user_country = loc ? loc->country : NULL;
-        const char *user_city = loc ? loc->city : NULL;
-        cJSON *best_server = find_best_server(json, user_country, user_city);
-        if (best_server) {
-            cJSON *host_item = cJSON_GetObjectItem(best_server, "host");
-            cJSON *country_item = cJSON_GetObjectItem(best_server, "country");
-            cJSON *city_item = cJSON_GetObjectItem(best_server, "city");
-            const char *host = cJSON_GetStringValue(host_item);
-            const char *country = cJSON_GetStringValue(country_item);
-            const char *city = cJSON_GetStringValue(city_item);
-
-            printf("Best server: %s", host ? host : "Unknown");
-            if (country && city) {
-                printf(" (%s, %s)", country, city);
-            }
-            printf("\n");
-        } else {
-            printf("No suitable server found\n");
-        }
-
-        cJSON_Delete(json);
-    }
-
     int option;
-    while ((option = getopt(argc, argv, "du:")) != -1) {
+    int option_index = 0;
+    int do_download = 0;
+    int do_upload = 0;
+    int do_find_server = 0;
+    int do_location = 0;
+    int do_automated = 0;
+    const char *download_server = NULL;
+    const char *upload_server = NULL;
+
+    static struct option long_options[] = {
+        {"download", required_argument, 0, 'd'},
+        {"upload", required_argument, 0, 'u'},
+        {"server", no_argument, 0, 's'},
+        {"location", no_argument, 0, 'l'},
+        {"automated", no_argument, 0, 'a'},
+        {"help", no_argument, 0, 'h'},
+        {0, 0, 0, 0}
+    };
+
+    while ((option = getopt_long(argc, argv, "d:u:slah", long_options, &option_index)) != -1) {
         switch (option) {
             case 'd':
-                printf("download option\n");
+                do_download = 1;
+                download_server = optarg;
+                if (!download_server || strlen(download_server) == 0) {
+                    fprintf(stderr, "Error: --download requires a server host\n");
+                    print_usage(argv[0]);
+                    curl_global_cleanup();
+                    return EXIT_FAILURE;
+                }
                 break;
             case 'u':
-                printf("upload option\n");
-                printf("arg: %s \n", optarg);
+                do_upload = 1;
+                upload_server = optarg;
+                if (!upload_server || strlen(upload_server) == 0) {
+                    fprintf(stderr, "Error: --upload requires a server host\n");
+                    print_usage(argv[0]);
+                    curl_global_cleanup();
+                    return EXIT_FAILURE;
+                }
                 break;
+            case 's':
+                do_find_server = 1;
+                break;
+            case 'l':
+                do_location = 1;
+                break;
+            case 'a':
+                do_automated = 1;
+                break;
+            case 'h':
+                print_usage(argv[0]);
+                curl_global_cleanup();
+                return EXIT_SUCCESS;
             default:
-                fprintf(stderr, "Usage: %s [du] \n", argv[0]);
+                print_usage(argv[0]);
+                curl_global_cleanup();
+                return EXIT_FAILURE;
         }
     }
 
+    /* If no options provided, show usage */
+    if (!do_download && !do_upload && !do_find_server && !do_location && !do_automated) {
+        print_usage(argv[0]);
+        curl_global_cleanup();
+        return EXIT_FAILURE;
+    }
+
+    struct location *loc = NULL;
+    cJSON *json = NULL;
+
+    if (do_automated) {
+        printf("automated\n");
+    } else {
+        if (do_location) {
+            printf("location detection\n");
+        }
+        if (do_find_server) {
+            printf("find best server\n");
+        }
+        if (do_download) {
+            printf("download\n");
+        }
+        if (do_upload) {
+            printf("upload\n");
+        }
+    }
+
+    /* Cleanup */
+    if (json) {
+        cJSON_Delete(json);
+    }
     curl_global_cleanup();
     if (loc) {
-        free(loc->country);
-        free(loc->city);
+        if (loc->country) {
+            free(loc->country);
+        }
+        if (loc->city) {
+            free(loc->city);
+        }
         free(loc);
     }
 
