@@ -17,7 +17,7 @@
 cJSON *read_json_file(const char *filename) {
     FILE *stream = fopen(filename, "r");
     if (!stream) {
-        fprintf(stderr, "error opening file: %s", filename);
+        fprintf(stderr, "Error opening file: %s\n", filename);
         exit(EXIT_FAILURE);
     }
 
