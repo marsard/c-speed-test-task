@@ -45,6 +45,14 @@ static size_t download_write_callback(char *buffer, size_t size, size_t nitems,
     return realsize;
 }
 
+static size_t discard_response_callback(char *buffer, size_t size, size_t nitems,
+                                        void *outstream) {
+    (void)buffer;
+    (void)outstream;
+    /* Discard server response without modifying any data */
+    return size * nitems;
+}
+
 static size_t api_response_callback(char *buffer, size_t size, size_t nitems,
                                     void *outstream) {
     struct response_data *data = (struct response_data *)outstream;
@@ -417,6 +425,8 @@ double test_upload_speed(const char *host) {
     curl_easy_setopt(curl, CURLOPT_READFUNCTION, upload_read_callback);
     curl_easy_setopt(curl, CURLOPT_READDATA, &data);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)upload_size);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, discard_response_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, NULL);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transfer_progress_callback);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
