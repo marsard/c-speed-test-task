@@ -275,132 +275,143 @@ static int transfer_progress_callback(void *clientp, curl_off_t dltotal, curl_of
     return 0;
 }
 
-void curl_download_test(const char *host) {
+/* Test download speed and return speed in Mbps, or -1.0 on failure */
+double test_download_speed(const char *host) {
     CURL *curl = curl_easy_init();
-    if (curl) {
-        char url[256];
-        strcpy(url, "http://");
-        strcat(url, host);
-        strcat(url, DOWNLOAD_PATH);
-
-        struct transfer_data data;
-        data.total_bytes = 0;
-        data.upload_buffer = NULL;
-        data.upload_size = 0;
-        data.upload_sent = 0;
-
-        struct progress_data progress;
-        progress.last_bytes_shown = 0;
-        progress.is_upload = 0;
-
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, download_write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &data);
-        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transfer_progress_callback);
-        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress);
-        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)SPEEDTEST_TIMEOUT_SEC);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
-
-        printf("Testing download speed from %s...\n", host);
-        CURLcode res = curl_easy_perform(curl);
-        printf("\n");
-
-        if (res == CURLE_OK) {
-            long response_code;
-            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-            double total_time;
-            curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
-            if (response_code == 200 && total_time > 0 && data.total_bytes > 0) {
-                double speed_bps = (data.total_bytes * 8.0) / total_time;
-                double speed_mbps = speed_bps / 1000000.0;
-                double mb_downloaded = data.total_bytes / (1024.0 * 1024.0);
-                printf("Downloaded %.2f MB in %.2f seconds\n", mb_downloaded, total_time);
-                printf("Download speed: %.2f Mbps\n", speed_mbps);
-            } else {
-                if (response_code != 200) {
-                    printf("Warning: Server returned error code %ld\n", response_code);
-                } else {
-                    printf("Warning: No data downloaded or time is zero\n");
-                }
-            }
-        } else {
-            fprintf(stderr, "Download failed: %s\n", curl_easy_strerror(res));
-        }
-        curl_easy_cleanup(curl);
+    if (!curl) {
+        return -1.0;
     }
+
+    char url[256];
+    strcpy(url, "http://");
+    strcat(url, host);
+    strcat(url, DOWNLOAD_PATH);
+
+    struct transfer_data data;
+    data.total_bytes = 0;
+    data.upload_buffer = NULL;
+    data.upload_size = 0;
+    data.upload_sent = 0;
+
+    struct progress_data progress;
+    progress.last_bytes_shown = 0;
+    progress.is_upload = 0;
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, download_write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &data);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transfer_progress_callback);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)SPEEDTEST_TIMEOUT_SEC);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
+
+    printf("Testing download speed from %s...\n", host);
+    CURLcode res = curl_easy_perform(curl);
+    printf("\n");
+
+    double speed_mbps = -1.0;
+
+    if (res == CURLE_OK) {
+        long response_code;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+        double total_time;
+        curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
+        if (response_code == 200 && total_time > 0 && data.total_bytes > 0) {
+            double speed_bps = (data.total_bytes * 8.0) / total_time;
+            speed_mbps = speed_bps / 1000000.0;
+            double mb_downloaded = data.total_bytes / (1024.0 * 1024.0);
+            printf("Downloaded %.2f MB in %.2f seconds\n", mb_downloaded, total_time);
+        } else {
+            if (response_code != 200) {
+                printf("Warning: Server returned error code %ld\n", response_code);
+            } else {
+                printf("Warning: No data downloaded or time is zero\n");
+            }
+        }
+    } else {
+        fprintf(stderr, "Download failed: %s\n", curl_easy_strerror(res));
+    }
+
+    curl_easy_cleanup(curl);
+    return speed_mbps;
 }
 
-void curl_upload_test(const char *host) {
+/* Test upload speed and return speed in Mbps, or -1.0 on failure */
+double test_upload_speed(const char *host) {
     CURL *curl = curl_easy_init();
-    if (curl) {
-        char url[256];
-        strcpy(url, "http://");
-        strcat(url, host);
-        strcat(url, UPLOAD_PATH);
-
-        /* Generate upload data */
-        size_t upload_size = UPLOAD_SIZE_MB * 1024 * 1024;
-        char *upload_buffer = malloc(upload_size);
-        if (!upload_buffer) {
-            fprintf(stderr, "Failed to allocate upload buffer\n");
-            curl_easy_cleanup(curl);
-            return;
-        }
-
-        /* Fill with some data */
-        memset(upload_buffer, 'A', upload_size);
-
-        struct transfer_data data;
-        data.total_bytes = 0;
-        data.upload_buffer = upload_buffer;
-        data.upload_size = upload_size;
-        data.upload_sent = 0;
-
-        struct progress_data progress;
-        progress.last_bytes_shown = 0;
-        progress.is_upload = 1;
-
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        curl_easy_setopt(curl, CURLOPT_READFUNCTION, upload_read_callback);
-        curl_easy_setopt(curl, CURLOPT_READDATA, &data);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)upload_size);
-        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transfer_progress_callback);
-        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress);
-        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)SPEEDTEST_TIMEOUT_SEC);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
-
-        printf("Testing upload speed to %s...\n", host);
-        CURLcode res = curl_easy_perform(curl);
-        printf("\n");
-
-        if (res == CURLE_OK) {
-            long response_code;
-            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-            double total_time;
-            curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
-            if (response_code == 200 && total_time > 0 && data.total_bytes > 0) {
-                double speed_bps = (data.total_bytes * 8.0) / total_time;
-                double speed_mbps = speed_bps / 1000000.0;
-                double mb_uploaded = data.total_bytes / (1024.0 * 1024.0);
-                printf("Uploaded %.2f MB in %.2f seconds\n", mb_uploaded, total_time);
-                printf("Upload speed: %.2f Mbps\n", speed_mbps);
-            } else {
-                if (response_code != 200) {
-                    printf("Warning: Server returned error code %ld\n", response_code);
-                } else {
-                    printf("Warning: No data uploaded or time is zero\n");
-                }
-            }
-        } else {
-            fprintf(stderr, "Upload failed: %s\n", curl_easy_strerror(res));
-        }
-
-        free(upload_buffer);
-        curl_easy_cleanup(curl);
+    if (!curl) {
+        return -1.0;
     }
+
+    char url[256];
+    strcpy(url, "http://");
+    strcat(url, host);
+    strcat(url, UPLOAD_PATH);
+
+    /* Generate upload data */
+    size_t upload_size = UPLOAD_SIZE_MB * 1024 * 1024;
+    char *upload_buffer = malloc(upload_size);
+    if (!upload_buffer) {
+        fprintf(stderr, "Failed to allocate upload buffer\n");
+        curl_easy_cleanup(curl);
+        return -1.0;
+    }
+
+    /* Fill with some data */
+    memset(upload_buffer, 'A', upload_size);
+
+    struct transfer_data data;
+    data.total_bytes = 0;
+    data.upload_buffer = upload_buffer;
+    data.upload_size = upload_size;
+    data.upload_sent = 0;
+
+    struct progress_data progress;
+    progress.last_bytes_shown = 0;
+    progress.is_upload = 1;
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, upload_read_callback);
+    curl_easy_setopt(curl, CURLOPT_READDATA, &data);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)upload_size);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, transfer_progress_callback);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, (long)SPEEDTEST_TIMEOUT_SEC);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
+
+    printf("Testing upload speed to %s...\n", host);
+    CURLcode res = curl_easy_perform(curl);
+    printf("\n");
+
+    double speed_mbps = -1.0;
+
+    if (res == CURLE_OK) {
+        long response_code;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+        double total_time;
+        curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
+        if (response_code == 200 && total_time > 0 && data.total_bytes > 0) {
+            double speed_bps = (data.total_bytes * 8.0) / total_time;
+            speed_mbps = speed_bps / 1000000.0;
+            double mb_uploaded = data.total_bytes / (1024.0 * 1024.0);
+            printf("Uploaded %.2f MB in %.2f seconds\n", mb_uploaded, total_time);
+        } else {
+            if (response_code != 200) {
+                printf("Warning: Server returned error code %ld\n", response_code);
+            } else {
+                printf("Warning: No data uploaded or time is zero\n");
+            }
+        }
+    } else {
+        fprintf(stderr, "Upload failed: %s\n", curl_easy_strerror(res));
+    }
+
+    free(upload_buffer);
+    curl_easy_cleanup(curl);
+    return speed_mbps;
 }
 
 struct location {
@@ -567,10 +578,16 @@ int main(int argc, char *argv[]) {
             printf("find best server\n");
         }
         if (do_download) {
-            printf("download\n");
+            double speed = test_download_speed(download_server);
+            if (speed >= 0.0) {
+                printf("Download speed: %.2f Mbps\n", speed);
+            }
         }
         if (do_upload) {
-            printf("upload\n");
+            double speed = test_upload_speed(upload_server);
+            if (speed >= 0.0) {
+                printf("Upload speed: %.2f Mbps\n", speed);
+            }
         }
     }
 
