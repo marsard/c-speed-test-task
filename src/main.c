@@ -1,10 +1,10 @@
+#include "cJSON.h"
+#include <curl/curl.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <curl/curl.h>
-#include "cJSON.h"
 
 /* Constants */
 #define SPEEDTEST_TIMEOUT_SEC 15
@@ -92,7 +92,8 @@ static int test_server_reachable(const char *host) {
 }
 
 /* Find best server by location */
-static cJSON *find_best_server(cJSON *json_array, const char *user_country, const char *user_city) {
+static cJSON *find_best_server(cJSON *json_array, const char *user_country,
+                               const char *user_city) {
     if (!json_array || !cJSON_IsArray(json_array)) {
         return NULL;
     }
@@ -187,7 +188,8 @@ static cJSON *find_best_server(cJSON *json_array, const char *user_country, cons
     return NULL;
 }
 
-static size_t download_write_callback(char *buffer, size_t size, size_t nitems, void *outstream) {
+static size_t download_write_callback(char *buffer, size_t size, size_t nitems,
+                                      void *outstream) {
     (void)buffer;
     struct transfer_data *data = (struct transfer_data *)outstream;
     size_t realsize = size * nitems;
@@ -195,7 +197,8 @@ static size_t download_write_callback(char *buffer, size_t size, size_t nitems, 
     return realsize;
 }
 
-static size_t api_response_callback(char *buffer, size_t size, size_t nitems, void *outstream) {
+static size_t api_response_callback(char *buffer, size_t size, size_t nitems,
+                                    void *outstream) {
     struct response_data *data = (struct response_data *)outstream;
     size_t realsize = size * nitems;
 
@@ -209,7 +212,8 @@ static size_t api_response_callback(char *buffer, size_t size, size_t nitems, vo
     return realsize;
 }
 
-static size_t upload_read_callback(char *buffer, size_t size, size_t nitems, void *instream) {
+static size_t upload_read_callback(char *buffer, size_t size, size_t nitems,
+                                   void *instream) {
     struct transfer_data *data = (struct transfer_data *)instream;
     size_t max_bytes = size * nitems;
     size_t remaining = data->upload_size - data->upload_sent;
@@ -224,8 +228,9 @@ static size_t upload_read_callback(char *buffer, size_t size, size_t nitems, voi
     return to_send;
 }
 
-static int transfer_progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
-                                      curl_off_t ultotal, curl_off_t ulnow) {
+static int transfer_progress_callback(void *clientp, curl_off_t dltotal,
+                                      curl_off_t dlnow, curl_off_t ultotal,
+                                      curl_off_t ulnow) {
     struct progress_data *progress = (struct progress_data *)clientp;
     curl_off_t one_mb = 1024 * 1024;
     curl_off_t current_bytes;
@@ -250,8 +255,8 @@ static int transfer_progress_callback(void *clientp, curl_off_t dltotal, curl_of
                 double percent = (ulnow * 100.0) / ultotal;
                 double mb_current = ulnow / (1024.0 * 1024.0);
                 double mb_total = ultotal / (1024.0 * 1024.0);
-                printf("\rUpload progress: %.2f / %.2f MB (%.1f%%)...",
-                       mb_current, mb_total, percent);
+                printf("\rUpload progress: %.2f / %.2f MB (%.1f%%)...", mb_current,
+                       mb_total, percent);
             } else {
                 double mb_current = ulnow / (1024.0 * 1024.0);
                 printf("\rUpload progress: %.2f MB uploaded...", mb_current);
@@ -261,8 +266,8 @@ static int transfer_progress_callback(void *clientp, curl_off_t dltotal, curl_of
                 double percent = (dlnow * 100.0) / dltotal;
                 double mb_current = dlnow / (1024.0 * 1024.0);
                 double mb_total = dltotal / (1024.0 * 1024.0);
-                printf("\rDownload progress: %.2f / %.2f MB (%.1f%%)...",
-                       mb_current, mb_total, percent);
+                printf("\rDownload progress: %.2f / %.2f MB (%.1f%%)...", mb_current,
+                       mb_total, percent);
             } else {
                 double mb_current = dlnow / (1024.0 * 1024.0);
                 printf("\rDownload progress: %.2f MB downloaded...", mb_current);
@@ -323,7 +328,8 @@ double test_download_speed(const char *host) {
             double speed_bps = (data.total_bytes * 8.0) / total_time;
             speed_mbps = speed_bps / 1000000.0;
             double mb_downloaded = data.total_bytes / (1024.0 * 1024.0);
-            printf("Downloaded %.2f MB in %.2f seconds (timeout reached)\n", mb_downloaded, total_time);
+            printf("Downloaded %.2f MB in %.2f seconds (timeout reached)\n",
+                   mb_downloaded, total_time);
         } else {
             printf("Warning: Timeout reached but no data was downloaded\n");
         }
@@ -410,7 +416,8 @@ double test_upload_speed(const char *host) {
             double speed_bps = (data.total_bytes * 8.0) / total_time;
             speed_mbps = speed_bps / 1000000.0;
             double mb_uploaded = data.total_bytes / (1024.0 * 1024.0);
-            printf("Uploaded %.2f MB in %.2f seconds (timeout reached)\n", mb_uploaded, total_time);
+            printf("Uploaded %.2f MB in %.2f seconds (timeout reached)\n",
+                   mb_uploaded, total_time);
         } else {
             printf("Warning: Timeout reached but no data was uploaded\n");
         }
@@ -535,10 +542,10 @@ int main(int argc, char *argv[]) {
         {"location", no_argument, 0, 'l'},
         {"automated", no_argument, 0, 'a'},
         {"help", no_argument, 0, 'h'},
-        {0, 0, 0, 0}
-    };
+        {0, 0, 0, 0}};
 
-    while ((option = getopt_long(argc, argv, "d:u:slah", long_options, &option_index)) != -1) {
+    while ((option = getopt_long(argc, argv, "d:u:slah", long_options,
+                                 &option_index)) != -1) {
         switch (option) {
             case 'd':
                 do_download = 1;
@@ -581,7 +588,8 @@ int main(int argc, char *argv[]) {
     }
 
     /* If no options provided, show usage */
-    if (!do_download && !do_upload && !do_find_server && !do_location && !do_automated) {
+    if (!do_download && !do_upload && !do_find_server && !do_location &&
+        !do_automated) {
         print_usage(argv[0]);
         curl_global_cleanup();
         return EXIT_FAILURE;
