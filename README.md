@@ -45,3 +45,30 @@ sudo dnf install libcurl-devel
 ```bash
 sudo pacman -S curl
 ```
+
+## Example output
+
+```
+ ./main -a
+Detecting location...
+Location detected: Lithuania, Kaunas
+
+Finding best server...
+Found 5873 servers in list
+Best server selected: speedtest.litnet.lt:8080
+
+Testing download speed from speedtest.litnet.lt:8080...
+Download progress: 29.54 / 30.16 MB (98.0%)...
+Downloaded 30.16 MB in 3.29 seconds
+
+Testing upload speed to speedtest.litnet.lt:8080...
+Upload progress: 30.00 / 30.00 MB (100.0%)...
+Uploaded 30.00 MB in 6.24 seconds
+
+Results:
+========
+Download speed: 77.00 Mbps
+Upload speed: 40.31 Mbps
+Server: speedtest.litnet.lt:8080
+Location: Lithuania
+```
