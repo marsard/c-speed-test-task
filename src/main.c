@@ -91,6 +91,102 @@ static int test_server_reachable(const char *host) {
     return reachable;
 }
 
+/* Find best server by location */
+static cJSON *find_best_server(cJSON *json_array, const char *user_country, const char *user_city) {
+    if (!json_array || !cJSON_IsArray(json_array)) {
+        return NULL;
+    }
+
+    int count = cJSON_GetArraySize(json_array);
+    int i;
+    cJSON *server;
+    const char *host;
+    const char *country;
+    const char *city;
+
+    /* Priority 1: test all city+country matches */
+    if (user_city && user_country) {
+        for (i = 0; i < count; i++) {
+            server = cJSON_GetArrayItem(json_array, i);
+            if (!server || !cJSON_IsObject(server)) {
+                continue;
+            }
+
+            host = cJSON_GetStringValue(cJSON_GetObjectItem(server, "host"));
+            country = cJSON_GetStringValue(cJSON_GetObjectItem(server, "country"));
+            city = cJSON_GetStringValue(cJSON_GetObjectItem(server, "city"));
+
+            if (!host || !city || !country) {
+                continue;
+            }
+
+            if (strcmp(city, user_city) == 0 && strcmp(country, user_country) == 0) {
+                if (test_server_reachable(host)) {
+                    return server;
+                }
+            }
+        }
+    }
+
+    /* Priority 2: test all country matches (only if no city+country worked) */
+    if (user_country) {
+        for (i = 0; i < count; i++) {
+            server = cJSON_GetArrayItem(json_array, i);
+            if (!server || !cJSON_IsObject(server)) {
+                continue;
+            }
+
+            host = cJSON_GetStringValue(cJSON_GetObjectItem(server, "host"));
+            country = cJSON_GetStringValue(cJSON_GetObjectItem(server, "country"));
+            city = cJSON_GetStringValue(cJSON_GetObjectItem(server, "city"));
+
+            if (!host || !country || !city) {
+                continue;
+            }
+
+            if (strcmp(country, user_country) != 0) {
+                continue;
+            }
+
+            /* Skip if it's a city+country match (already tested in priority 1) */
+            if (user_city && strcmp(city, user_city) == 0) {
+                continue;
+            }
+
+            if (test_server_reachable(host)) {
+                return server;
+            }
+        }
+    }
+
+    /* Priority 3: test any server (only if no country match worked) */
+    for (i = 0; i < count; i++) {
+        server = cJSON_GetArrayItem(json_array, i);
+        if (!server || !cJSON_IsObject(server)) {
+            continue;
+        }
+
+        host = cJSON_GetStringValue(cJSON_GetObjectItem(server, "host"));
+        country = cJSON_GetStringValue(cJSON_GetObjectItem(server, "country"));
+        city = cJSON_GetStringValue(cJSON_GetObjectItem(server, "city"));
+
+        if (!host || !country || !city) {
+            continue;
+        }
+
+        /* Skip if already tested as city+country or country match */
+        if (user_country && strcmp(country, user_country) == 0) {
+            continue;
+        }
+
+        if (test_server_reachable(host)) {
+            return server;
+        }
+    }
+
+    return NULL;
+}
+
 static size_t download_write_callback(char *buffer, size_t size, size_t nitems, void *outstream) {
     (void)buffer;
     struct transfer_data *data = (struct transfer_data *)outstream;
@@ -388,36 +484,35 @@ int main(int argc, char *argv[]) {
     }
 
 
+    /* Find best server */
     cJSON *json = read_json_file("speedtest_server_list.json");
-    cJSON *first = cJSON_GetArrayItem(json, 0);
-    const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(first, "host"));
-    test_server_reachable(host);
-    if (json) {
-        cJSON_Delete(json);
-    }
-    /*
     if (json && cJSON_IsArray(json)) {
         int count = cJSON_GetArraySize(json);
-        printf("Testing first 5 servers for reachability:\n");
-        int i;
-        int max_test = (count < 5) ? count : 5;
-        for (i = 0; i < max_test; i++) {
-            cJSON *server = cJSON_GetArrayItem(json, i);
-            if (server) {
-                const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(server, "host"));
-                if (host) {
-                    printf("Testing %s... ", host);
-                    if (test_server_reachable(host)) {
-                        printf("OK\n");
-                    } else {
-                        printf("Failed\n");
-                    }
-                }
+        printf("Found %d servers\n", count);
+        printf("Finding best server...\n");
+
+        const char *user_country = loc ? loc->country : NULL;
+        const char *user_city = loc ? loc->city : NULL;
+        cJSON *best_server = find_best_server(json, user_country, user_city);
+        if (best_server) {
+            cJSON *host_item = cJSON_GetObjectItem(best_server, "host");
+            cJSON *country_item = cJSON_GetObjectItem(best_server, "country");
+            cJSON *city_item = cJSON_GetObjectItem(best_server, "city");
+            const char *host = cJSON_GetStringValue(host_item);
+            const char *country = cJSON_GetStringValue(country_item);
+            const char *city = cJSON_GetStringValue(city_item);
+
+            printf("Best server: %s", host ? host : "Unknown");
+            if (country && city) {
+                printf(" (%s, %s)", country, city);
             }
+            printf("\n");
+        } else {
+            printf("No suitable server found\n");
         }
+
         cJSON_Delete(json);
     }
-    */
 
     int option;
     while ((option = getopt(argc, argv, "du:")) != -1) {
