@@ -24,5 +24,24 @@ Options:
 
 ## Requirements
 
-- libcurl
+- C compiler
+- make
+- libcurl development headers
 - `speedtest_server_list.json` (must be in same directory as main executable)
+
+### Installing libcurl
+
+**Debian/Ubuntu:**
+```bash
+sudo apt install libcurl4-openssl-dev
+```
+
+**Fedora:**
+```bash
+sudo dnf install libcurl-devel
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S curl
+```
