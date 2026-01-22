@@ -311,12 +311,23 @@ double test_download_speed(const char *host) {
     printf("\n");
 
     double speed_mbps = -1.0;
+    double total_time;
+    long response_code;
 
-    if (res == CURLE_OK) {
-        long response_code;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-        double total_time;
-        curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
+    curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+
+    /* Handle timeout: calculate speed from data transferred before timeout */
+    if (res == CURLE_OPERATION_TIMEDOUT) {
+        if (data.total_bytes > 0 && total_time > 0) {
+            double speed_bps = (data.total_bytes * 8.0) / total_time;
+            speed_mbps = speed_bps / 1000000.0;
+            double mb_downloaded = data.total_bytes / (1024.0 * 1024.0);
+            printf("Downloaded %.2f MB in %.2f seconds (timeout reached)\n", mb_downloaded, total_time);
+        } else {
+            printf("Warning: Timeout reached but no data was downloaded\n");
+        }
+    } else if (res == CURLE_OK) {
         if (response_code == 200 && total_time > 0 && data.total_bytes > 0) {
             double speed_bps = (data.total_bytes * 8.0) / total_time;
             speed_mbps = speed_bps / 1000000.0;
@@ -387,12 +398,23 @@ double test_upload_speed(const char *host) {
     printf("\n");
 
     double speed_mbps = -1.0;
+    double total_time;
+    long response_code;
 
-    if (res == CURLE_OK) {
-        long response_code;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-        double total_time;
-        curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
+    curl_easy_getinfo(curl, CURLINFO_TOTAL_TIME, &total_time);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+
+    /* Handle timeout: calculate speed from data transferred before timeout */
+    if (res == CURLE_OPERATION_TIMEDOUT) {
+        if (data.total_bytes > 0 && total_time > 0) {
+            double speed_bps = (data.total_bytes * 8.0) / total_time;
+            speed_mbps = speed_bps / 1000000.0;
+            double mb_uploaded = data.total_bytes / (1024.0 * 1024.0);
+            printf("Uploaded %.2f MB in %.2f seconds (timeout reached)\n", mb_uploaded, total_time);
+        } else {
+            printf("Warning: Timeout reached but no data was uploaded\n");
+        }
+    } else if (res == CURLE_OK) {
         if (response_code == 200 && total_time > 0 && data.total_bytes > 0) {
             double speed_bps = (data.total_bytes * 8.0) / total_time;
             speed_mbps = speed_bps / 1000000.0;
