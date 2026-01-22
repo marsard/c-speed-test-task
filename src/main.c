@@ -14,6 +14,120 @@
 #define DOWNLOAD_PATH "/speedtest/random4000x4000.jpg"
 #define UPLOAD_PATH "/speedtest/upload.php"
 
+struct transfer_data {
+    size_t total_bytes;  /* Accumulated bytes for download or upload */
+    char *upload_buffer; /* Buffer for upload data */
+    size_t upload_size;  /* Total size of upload buffer */
+    size_t upload_sent;  /* Bytes already sent */
+};
+
+struct response_data {
+    char *buffer;
+    size_t size;
+};
+
+struct progress_data {
+    curl_off_t last_bytes_shown;
+    int is_upload;
+};
+
+struct location {
+    char *country;
+    char *city;
+};
+
+static size_t download_write_callback(char *buffer, size_t size, size_t nitems,
+                                      void *outstream) {
+    (void)buffer;
+    struct transfer_data *data = (struct transfer_data *)outstream;
+    size_t realsize = size * nitems;
+    data->total_bytes += realsize;
+    return realsize;
+}
+
+static size_t api_response_callback(char *buffer, size_t size, size_t nitems,
+                                    void *outstream) {
+    struct response_data *data = (struct response_data *)outstream;
+    size_t realsize = size * nitems;
+
+    data->buffer = realloc(data->buffer, data->size + realsize + 1);
+    if (data->buffer) {
+        memcpy(&(data->buffer[data->size]), buffer, realsize);
+        data->size += realsize;
+        data->buffer[data->size] = '\0';
+    }
+
+    return realsize;
+}
+
+static size_t upload_read_callback(char *buffer, size_t size, size_t nitems,
+                                   void *instream) {
+    struct transfer_data *data = (struct transfer_data *)instream;
+    size_t max_bytes = size * nitems;
+    size_t remaining = data->upload_size - data->upload_sent;
+    size_t to_send = (max_bytes < remaining) ? max_bytes : remaining;
+
+    if (to_send > 0 && data->upload_buffer) {
+        memcpy(buffer, data->upload_buffer + data->upload_sent, to_send);
+        data->upload_sent += to_send;
+        data->total_bytes += to_send;
+    }
+
+    return to_send;
+}
+
+static int transfer_progress_callback(void *clientp, curl_off_t dltotal,
+                                      curl_off_t dlnow, curl_off_t ultotal,
+                                      curl_off_t ulnow) {
+    struct progress_data *progress = (struct progress_data *)clientp;
+    curl_off_t one_mb = 1024 * 1024;
+    curl_off_t current_bytes;
+
+    if (!progress) {
+        return 0;
+    }
+
+    /* Determine if this is upload or download */
+    if (ultotal > 0 || ulnow > 0) {
+        progress->is_upload = 1;
+        current_bytes = ulnow;
+    } else {
+        progress->is_upload = 0;
+        current_bytes = dlnow;
+    }
+
+    /* Show progress every 1MB */
+    if (current_bytes >= progress->last_bytes_shown + one_mb) {
+        if (progress->is_upload) {
+            if (ultotal > 0) {
+                double percent = (ulnow * 100.0) / ultotal;
+                double mb_current = ulnow / (1024.0 * 1024.0);
+                double mb_total = ultotal / (1024.0 * 1024.0);
+                printf("\rUpload progress: %.2f / %.2f MB (%.1f%%)...", mb_current,
+                       mb_total, percent);
+            } else {
+                double mb_current = ulnow / (1024.0 * 1024.0);
+                printf("\rUpload progress: %.2f MB uploaded...", mb_current);
+            }
+        } else {
+            if (dltotal > 0) {
+                double percent = (dlnow * 100.0) / dltotal;
+                double mb_current = dlnow / (1024.0 * 1024.0);
+                double mb_total = dltotal / (1024.0 * 1024.0);
+                printf("\rDownload progress: %.2f / %.2f MB (%.1f%%)...", mb_current,
+                       mb_total, percent);
+            } else {
+                double mb_current = dlnow / (1024.0 * 1024.0);
+                printf("\rDownload progress: %.2f MB downloaded...", mb_current);
+            }
+        }
+        fflush(stdout);
+        progress->last_bytes_shown = current_bytes;
+    }
+
+    return 0;
+}
+
 cJSON *read_json_file(const char *filename) {
     FILE *stream = fopen(filename, "r");
     if (!stream) {
@@ -42,23 +156,6 @@ cJSON *read_json_file(const char *filename) {
 
     return json;
 }
-
-struct transfer_data {
-    size_t total_bytes;  /* Accumulated bytes for download or upload */
-    char *upload_buffer; /* Buffer for upload data */
-    size_t upload_size;  /* Total size of upload buffer */
-    size_t upload_sent;  /* Bytes already sent */
-};
-
-struct response_data {
-    char *buffer;
-    size_t size;
-};
-
-struct progress_data {
-    curl_off_t last_bytes_shown;
-    int is_upload;
-};
 
 static int test_server_reachable(const char *host) {
     CURL *curl = curl_easy_init();
@@ -186,98 +283,6 @@ static cJSON *find_best_server(cJSON *json_array, const char *user_country,
     }
 
     return NULL;
-}
-
-static size_t download_write_callback(char *buffer, size_t size, size_t nitems,
-                                      void *outstream) {
-    (void)buffer;
-    struct transfer_data *data = (struct transfer_data *)outstream;
-    size_t realsize = size * nitems;
-    data->total_bytes += realsize;
-    return realsize;
-}
-
-static size_t api_response_callback(char *buffer, size_t size, size_t nitems,
-                                    void *outstream) {
-    struct response_data *data = (struct response_data *)outstream;
-    size_t realsize = size * nitems;
-
-    data->buffer = realloc(data->buffer, data->size + realsize + 1);
-    if (data->buffer) {
-        memcpy(&(data->buffer[data->size]), buffer, realsize);
-        data->size += realsize;
-        data->buffer[data->size] = '\0';
-    }
-
-    return realsize;
-}
-
-static size_t upload_read_callback(char *buffer, size_t size, size_t nitems,
-                                   void *instream) {
-    struct transfer_data *data = (struct transfer_data *)instream;
-    size_t max_bytes = size * nitems;
-    size_t remaining = data->upload_size - data->upload_sent;
-    size_t to_send = (max_bytes < remaining) ? max_bytes : remaining;
-
-    if (to_send > 0 && data->upload_buffer) {
-        memcpy(buffer, data->upload_buffer + data->upload_sent, to_send);
-        data->upload_sent += to_send;
-        data->total_bytes += to_send;
-    }
-
-    return to_send;
-}
-
-static int transfer_progress_callback(void *clientp, curl_off_t dltotal,
-                                      curl_off_t dlnow, curl_off_t ultotal,
-                                      curl_off_t ulnow) {
-    struct progress_data *progress = (struct progress_data *)clientp;
-    curl_off_t one_mb = 1024 * 1024;
-    curl_off_t current_bytes;
-
-    if (!progress) {
-        return 0;
-    }
-
-    /* Determine if this is upload or download */
-    if (ultotal > 0 || ulnow > 0) {
-        progress->is_upload = 1;
-        current_bytes = ulnow;
-    } else {
-        progress->is_upload = 0;
-        current_bytes = dlnow;
-    }
-
-    /* Show progress every 1MB */
-    if (current_bytes >= progress->last_bytes_shown + one_mb) {
-        if (progress->is_upload) {
-            if (ultotal > 0) {
-                double percent = (ulnow * 100.0) / ultotal;
-                double mb_current = ulnow / (1024.0 * 1024.0);
-                double mb_total = ultotal / (1024.0 * 1024.0);
-                printf("\rUpload progress: %.2f / %.2f MB (%.1f%%)...", mb_current,
-                       mb_total, percent);
-            } else {
-                double mb_current = ulnow / (1024.0 * 1024.0);
-                printf("\rUpload progress: %.2f MB uploaded...", mb_current);
-            }
-        } else {
-            if (dltotal > 0) {
-                double percent = (dlnow * 100.0) / dltotal;
-                double mb_current = dlnow / (1024.0 * 1024.0);
-                double mb_total = dltotal / (1024.0 * 1024.0);
-                printf("\rDownload progress: %.2f / %.2f MB (%.1f%%)...", mb_current,
-                       mb_total, percent);
-            } else {
-                double mb_current = dlnow / (1024.0 * 1024.0);
-                printf("\rDownload progress: %.2f MB downloaded...", mb_current);
-            }
-        }
-        fflush(stdout);
-        progress->last_bytes_shown = current_bytes;
-    }
-
-    return 0;
 }
 
 /* Test download speed and return speed in Mbps, or -1.0 on failure */
@@ -442,11 +447,6 @@ double test_upload_speed(const char *host) {
     curl_easy_cleanup(curl);
     return speed_mbps;
 }
-
-struct location {
-    char *country;
-    char *city;
-};
 
 /* Detect user's location using geolocation API */
 struct location *detect_location(void) {
