@@ -597,15 +597,126 @@ int main(int argc, char *argv[]) {
 
     struct location *loc = NULL;
     cJSON *json = NULL;
+    cJSON *best_server = NULL;
+    const char *test_server_host = NULL;
+    double download_speed = -1.0;
+    double upload_speed = -1.0;
 
     if (do_automated) {
-        printf("automated\n");
+        /* 1. Detect location */
+        printf("Detecting location...\n");
+        loc = detect_location();
+        if (loc) {
+            printf("Location detected: %s", loc->country ? loc->country : "Unknown");
+            if (loc->city) {
+                printf(", %s", loc->city);
+            }
+            printf("\n");
+        } else {
+            printf("Warning: Failed to detect location, continuing anyway...\n");
+        }
+        printf("\n");
+
+        /* 2. Find best server */
+        printf("Finding best server...\n");
+        json = read_json_file("speedtest_server_list.json");
+        if (!json || !cJSON_IsArray(json)) {
+            printf("Error: Failed to read or parse server list\n");
+        } else {
+            int count = cJSON_GetArraySize(json);
+            printf("Found %d servers in list\n", count);
+
+            const char *user_country = loc ? loc->country : NULL;
+            const char *user_city = loc ? loc->city : NULL;
+            best_server = find_best_server(json, user_country, user_city);
+            if (!best_server) {
+                printf("Error: No suitable server found\n");
+            } else {
+                cJSON *host_item = cJSON_GetObjectItem(best_server, "host");
+                test_server_host = cJSON_GetStringValue(host_item);
+                if (!test_server_host) {
+                    printf("Error: Best server has no host\n");
+                } else {
+                    printf("Best server selected: %s\n", test_server_host);
+                    printf("\n");
+
+                    /* 3. Download test */
+                    download_speed = test_download_speed(test_server_host);
+                    printf("\n");
+
+                    /* 4. Upload test */
+                    upload_speed = test_upload_speed(test_server_host);
+                    printf("\n");
+
+                    /* 5. Print final results */
+                    printf("Results:\n");
+                    printf("========\n");
+                    if (download_speed >= 0.0) {
+                        printf("Download speed: %.2f Mbps\n", download_speed);
+                    } else {
+                        printf("Download speed: Failed\n");
+                    }
+                    if (upload_speed >= 0.0) {
+                        printf("Upload speed: %.2f Mbps\n", upload_speed);
+                    } else {
+                        printf("Upload speed: Failed\n");
+                    }
+                    if (test_server_host) {
+                        printf("Server: %s\n", test_server_host);
+                    }
+                    if (loc && loc->country) {
+                        printf("Location: %s\n", loc->country);
+                    }
+                    printf("\n");
+                }
+            }
+        }
     } else {
         if (do_location) {
-            printf("location detection\n");
+            printf("Detecting location...\n");
+            loc = detect_location();
+            if (loc) {
+                printf("Country: %s\n", loc->country ? loc->country : "Unknown");
+                if (loc->city) {
+                    printf("City: %s\n", loc->city);
+                }
+            } else {
+                printf("Failed to detect location\n");
+            }
         }
+
         if (do_find_server) {
-            printf("find best server\n");
+            printf("Finding best server...\n");
+            if (!loc) {
+                loc = detect_location();
+            }
+            json = read_json_file("speedtest_server_list.json");
+            if (json && cJSON_IsArray(json)) {
+                int count = cJSON_GetArraySize(json);
+                printf("Found %d servers in list\n", count);
+
+                const char *user_country = loc ? loc->country : NULL;
+                const char *user_city = loc ? loc->city : NULL;
+                best_server = find_best_server(json, user_country, user_city);
+                if (best_server) {
+                    cJSON *host_item = cJSON_GetObjectItem(best_server, "host");
+                    cJSON *country_item = cJSON_GetObjectItem(best_server, "country");
+                    cJSON *city_item = cJSON_GetObjectItem(best_server, "city");
+                    const char *host = cJSON_GetStringValue(host_item);
+                    const char *country = cJSON_GetStringValue(country_item);
+                    const char *city = cJSON_GetStringValue(city_item);
+
+                    printf("Best server: %s", host ? host : "Unknown");
+                    if (country) {
+                        printf(" (%s, %s)", country, city);
+                    }
+                    printf("\n");
+                } else {
+                    printf("No suitable server found\n");
+                }
+            } else {
+                fprintf(stderr, "Error: Failed to read or parse server list\n");
+            }
         }
         if (do_download) {
             double speed = test_download_speed(download_server);
